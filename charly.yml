@@ -72,10 +72,24 @@ check-fireactions-host:
                 fireactions --help >/dev/null
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
-              command: fireactions validate /etc/fireactions/config.yaml
+              command: |
+                # The config is 0640 root - deliberately, because it carries the App key - and the daemon
+                # reads it as root. So the validator runs with the same privilege rather than the layer
+                # widening the file's mode to make a check convenient. Measured: without this the check read
+                # as uid 1000 and failed with permission denied.
+                sudo -n /usr/local/bin/fireactions validate /etc/fireactions/config.yaml
             - check: containerd is present with the device-less snapshotter this substrate needs
               id: containerd-native-snapshotter
               command: |
                 set -eu
+                if [ ! -f /etc/containerd/config.toml ]; then
+                  echo "no /etc/containerd/config.toml; /etc/containerd holds:" >&2
+                  ls -la /etc/containerd 2>&1 | head -4 >&2
+                  exit 1
+                fi
                 grep -q 'snapshotter = "native"' /etc/containerd/config.toml
-                systemctl is-enabled containerd.service >/dev/null 2>&1 || systemctl is-active containerd.service
+                if ! systemctl is-active containerd.service >/dev/null 2>&1; then
+                  echo "containerd.service is not active:" >&2
+                  systemctl status containerd.service --no-pager 2>&1 | head -8 >&2
+                  exit 1
+                fi

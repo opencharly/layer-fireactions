@@ -1,0 +1,21 @@
+WARNING: charly is a dev/worktree build (not installed at /usr/bin or /usr/local/bin); NOT loading the installed package's plugins from /usr/lib/charly/plugins (they may be built against a different charly version). Set CHARLY_PLUGIN_DIR to load plugins from a custom location.
+Building VM "fireactions-vm-base" (source.kind=cloud_image)
+Generated SSH keypair in /home/atrawog/.local/share/charly/vm/charly-fireactions-vm-base
+xorriso 1.5.8.pl02 : RockRidge filesystem manipulator, libburnia project.
+
+Drive current: -outdev 'stdio:/home/atrawog/Sync/Atrapub/no/dsh/opencharly/.worktrees/dsh-firecracker/layer-fireactions/image/fireactions-vm-base/seed.iso'
+Media current: stdio file, overwriteable
+Media status : is blank
+Media summary: 0 sessions, 0 data blocks, 0 data,  114g free
+Added to ISO image: file '/meta-data'='/tmp/charly-cidata-2988683407/meta-data'
+xorriso : UPDATE :       1 files added in 1 seconds
+Added to ISO image: file '/user-data'='/tmp/charly-cidata-2988683407/user-data'
+xorriso : UPDATE :       2 files added in 1 seconds
+ISO image produced: 185 sectors
+Written to medium : 185 sectors at LBA 0
+Writing to 'stdio:/home/atrawog/Sync/Atrapub/no/dsh/opencharly/.worktrees/dsh-firecracker/layer-fireactions/image/fireactions-vm-base/seed.iso' completed successfully.
+
+Wrote /home/atrawog/Sync/Atrapub/no/dsh/opencharly/.worktrees/dsh-firecracker/layer-fireactions/image/fireactions-vm-base/disk.qcow2 (base sha256=360f0fa49db6813bdc8e35bed230a2dc2ae3567b7b5ab74719c0a706e4e34e87)
+Wrote /home/atrawog/Sync/Atrapub/no/dsh/opencharly/.worktrees/dsh-firecracker/layer-fireactions/image/fireactions-vm-base/seed.iso
+Instance-id: 804ecf2b-0a61-4f51-b0ef-18f53945bdba
+Wrote VM box localhost/charly-fireactions-vm-base:2026.287.2108
