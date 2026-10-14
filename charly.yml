@@ -63,6 +63,12 @@ check-fireactions-host:
         check-fireactions-host-member:
             local:
                 from: fireactions-vm-host
+                # MEASURED: the deploy gate that writes systemd units and runs `systemctl enable --now`.
+                # Without it the deploy prepares everything and the unit stays loaded, disabled and
+                # inactive - which is exactly what this bed saw, and the skill states the gate explicitly
+                # ("--with-services | systemd unit writes; systemctl enable --now").
+                install_opts:
+                    with_service: true
         plan:
             - check: the pinned build is installed and it is the fork
               id: fireactions-binary
