@@ -4,3 +4,78 @@ discover:
       recursive: true
     - path: candy
       recursive: true
+
+# =============================================================================
+# WI-9's gate: fires on a DISPOSABLE VM, because fireactions supervises containerd
+# and drives Firecracker - a root daemon that a pod cannot host (the lesson
+# layer-containerd recorded when a uid-1000 supervisord could not setuid).
+#
+# The checks prove what can be proven without the GitHub App key, which the
+# ledger names as the visible-skip case: the server REFUSES to start on a
+# placeholder key (measured: "could not parse private key"), so the service and
+# pool checks are the ones a real key would enable, and the config's own
+# validator - the product's own tool, run in the plan - is the check that always
+# runs.
+# =============================================================================
+fireactions-vm-base:
+    vm:
+        source:
+            kind: cloud_image
+            url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            base_user: arch
+            distro: arch
+        backend: libvirt
+        disk_size: 20G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: bios
+        ssh:
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            package:
+                - sudo
+
+fireactions-vm-host:
+    local:
+        description: >-
+            A fireactions POOL HOST inside a guest: the layer itself (the pinned v2.0.8-oc1 build and its
+            validated config), the pinned Firecracker release and kernel it launches pools with, and
+            containerd from the distro - which the layer's own snapshotter choice is what makes usable on a
+            host with no devmapper device.
+        candy:
+            - layer-fireactions
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+            - '@github.com/opencharly/layer-containerd/candy/layer-containerd:8b140023272056a690b8dfb63c440ee74daff2c9'
+
+check-fireactions-host:
+    vm:
+        from: fireactions-vm-base
+        disposable: true
+        lifecycle: dev
+        description: >-
+            WI-9's gate on a disposable guest: the layer's config is validated by fireactions OWN validator,
+            and the containerd the pools need is present and configured with the snapshotter that needs no
+            block device. The service and pool checks need the GitHub App key, which is a credential the
+            operator holds - the ledger names that as the visible-skip case.
+        check-fireactions-host-member:
+            local:
+                from: fireactions-vm-host
+        plan:
+            - check: the pinned build is installed and it is the fork
+              id: fireactions-binary
+              command: |
+                set -eu
+                test -x /usr/local/bin/fireactions
+                fireactions --help >/dev/null
+            - check: the rendered config is one fireactions own validator accepts
+              id: fireactions-config-valid
+              command: fireactions validate /etc/fireactions/config.yaml
+            - check: containerd is present with the device-less snapshotter this substrate needs
+              id: containerd-native-snapshotter
+              command: |
+                set -eu
+                grep -q 'snapshotter = "native"' /etc/containerd/config.toml
+                systemctl is-enabled containerd.service >/dev/null 2>&1 || systemctl is-active containerd.service
