@@ -1,0 +1,46 @@
+# The fireactions layer: the pinned v2.0.8-oc1 build from the opencharly fork, and the contract that makes it
+# a POOL HOST rather than just a binary.
+#
+# The ref is a TAG on the FORK, not upstream's v2.0.8: the fork carries the containerd-snapshotter
+# configurability this integration needs (a host with no devmapper device must be able to run pools), and a
+# tag — not a branch — is the immutable pin Policy B asks for. Measured: the fork's main is four commits
+# ahead of upstream's tag, and `cmd/fireactions/main.go` is among the changed files.
+#
+# The build is upstream's own invocation — `go build ./cmd/fireactions` — with the tag stamped in through
+# ldflags, so the running binary can say which source it came from.
+layer-fireactions:
+    candy:
+        description: |
+            Fireactions, built from the pinned opencharly fork at v2.0.8-oc1, with the containerd
+            snapshotter configuration this substrate needs so a host without a devmapper device can still
+            run pools. Installs the binary, and hands the running contract — config, unit, pool probe — to
+            the bed that asserts it.
+        distro:
+            fedora:
+                package:
+                    - golang
+                    - git
+            arch:
+                package:
+                    - go
+                    - git
+        plan:
+            - run: fetch the pinned source from the opencharly fork
+              id: fireactions-source
+              download: "https://github.com/opencharly/fireactions/archive/refs/tags/v2.0.8-oc1.tar.gz"
+              extract: tar.gz
+              to: /opt/fireactions-src
+              run_as: root
+            - run: build it with the tag stamped in, the way upstream builds it
+              id: fireactions-build
+              run_as: root
+              command: |
+                set -eu
+                cd /opt/fireactions-src/fireactions-*
+                go build -trimpath -ldflags "-s -w -X main.version=v2.0.8-oc1" -o /usr/local/bin/fireactions ./cmd/fireactions
+            - check: the binary is installed and answers
+              id: fireactions-installed
+              command: test -x /usr/local/bin/fireactions && fireactions --help >/dev/null
+            - check: the source the binary was built from is the fork, not upstream
+              id: fireactions-source-is-the-fork
+              command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
