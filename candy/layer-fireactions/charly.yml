@@ -15,6 +15,13 @@ layer-fireactions:
             snapshotter configuration this substrate needs so a host without a devmapper device can still
             run pools. Installs the binary, and hands the running contract — config, unit, pool probe — to
             the bed that asserts it.
+            
+            HOSTING A RUNNING SERVICE: this candy declares `service: fireactions`. On a machine venue its
+            systemd unit is written and enabled only when the CONSUMER's deploy sets
+            `install_opts: with_service: true` - the same gate `distro-cachyos` and `box/cachyos` set for
+            sddm, and the org-wide way for a consumer to say it wants a service actually enabled. A
+            consumer that omits it still gets the binary, the rendered config and the pool CLI, but no
+            enabled unit. The bed in this repo sets it, so it exercises the documented consumer path.
         distro:
             fedora:
                 package:
@@ -24,7 +31,45 @@ layer-fireactions:
                 package:
                     - go
                     - git
+        secret_accept:
+          - name: FIREACTIONS_APP_PRIVATE_KEY
+            description: >-
+                The GitHub App private key fireactions uses to register runners. Supplied here rather
+                than baked into the config, so a deployment without it fails visibly instead of
+                shipping a placeholder App key.
+            key: charly/fireactions/app-private-key
+        service:
+            # ONE entry, because the init system picks the form: systemd renders a unit from the exec, and
+            # supervisord a program. The exec is a CHARLY-OWNED START SCRIPT rather than the binary itself,
+            # because the App key is a deploy-time credential the image cannot know: the script injects it
+            # from the environment `secret_accept:` provides, then execs `fireactions server --config <path>`.
+            - name: fireactions
+              exec: /usr/local/bin/start-fireactions.sh
         plan:
+            - run: write the charly-owned start script that injects the App key at runtime
+              id: fireactions-start-script
+              write: /usr/local/bin/start-fireactions.sh
+              mode: "0755"
+              run_as: root
+              content: |
+                #!/bin/bash
+                set -eu
+                # The image cannot know the credential, so the config ships without a usable key and this script
+                # writes it in from the environment `secret_accept:` injects. With no key the server must refuse
+                # to start and say so - a visible failure, never a placeholder that parses and then dies.
+                  if [ -z "${FIREACTIONS_APP_PRIVATE_KEY:-}" ]; then
+                    FIREACTIONS_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
+                  fi
+                keyfile=/etc/fireactions/config.yaml
+                tmp=$(mktemp)
+                sed '/^  app_private_key:/d' "$keyfile" > "$tmp"
+                {
+                  printf '  app_private_key: |\n'
+                  printf '%s\n' "$FIREACTIONS_APP_PRIVATE_KEY" | sed 's/^/    /'
+                } >> "$tmp"
+                mv "$tmp" "$keyfile"
+                chmod 0640 "$keyfile"
+                exec fireactions server --config "$keyfile"
             - run: fetch the pinned source from the opencharly fork
               id: fireactions-source
               download: "https://github.com/opencharly/fireactions/archive/refs/tags/v2.0.8-oc1.tar.gz"
@@ -41,6 +86,52 @@ layer-fireactions:
             - check: the binary is installed and answers
               id: fireactions-installed
               command: test -x /usr/local/bin/fireactions && fireactions --help >/dev/null
+            - run: render the server configuration fireactions will read
+              id: fireactions-config
+              write: /etc/fireactions/config.yaml
+              mode: "0640"
+              run_as: root
+              content: |
+                # Written by the charly fireactions layer. The shape is the fork's own testdata, VERIFIED
+                # against the real binary: `fireactions validate <file>` answers "is valid" for exactly this
+                # document (measured while building this layer), and `fireactions pools list` is the probe
+                # the bed uses - it fails visibly with a connection error when no server is running, which is
+                # the skip case the ledger asks for rather than a silent pass.
+                #
+                # The App key is NOT baked here. It is injected at deploy time by `secret_accept:` below,
+                # and the start script writes it into this file at runtime - an image cannot know a credential.
+                bind_address: 0.0.0.0:8080
+                metrics:
+                  enabled: true
+                  address: 127.0.0.1:8081
+
+                github:
+                  app_id: 1
+                  app_private_key: ""
+
+                pools:
+                - name: charly-check
+                  replicas: 0
+                  runner:
+                    name: charly-check
+                    image: ghcr.io/hostinger/fireactions/runner:ubuntu-20.04-x64-2.310.2
+                    image_pull_policy: IfNotPresent
+                    group_id: 1
+                    organization: opencharly
+                    labels: [self-hosted, charly-check]
+                  firecracker:
+                    binary_path: /usr/local/bin/firecracker
+            - check: the configuration this layer rendered is one fireactions accepts
+              id: fireactions-config-valid
+              command: fireactions validate /etc/fireactions/config.yaml
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
+
+
+
+
+
+
+
+
