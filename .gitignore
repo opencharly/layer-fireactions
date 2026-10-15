@@ -1,0 +1,6 @@
+# VM image build output. charly emits the disk and the cloud-init seed from the VM
+# entity source: URL and its cloud_init: block. Neither is a source artefact, and a
+# bed run rewrites seed.iso, so a tracked copy drifts on every run.
+image/*/
+# charly check-run output (`.check/<bed>/<calver>/`) — regenerated on every run.
+.check/
