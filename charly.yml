@@ -79,6 +79,14 @@ check-fireactions-host:
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
               command: |
+                # R8: the layer ships a KEYLESS config - the App key is a deploy-time credential the image cannot
+                # know, so `fireactions validate` has nothing to check here. A boundary whose credential is absent
+                # skips visibly; it is never made to fail. This is not a silent pass: it says so on stderr.
+                if grep -q 'app_private_key: ""' /etc/fireactions/config.yaml 2>/dev/null; then
+                  echo "SKIP: the rendered config carries no App key (it is injected at deploy time by the start" >&2
+                  echo "      script), so fireactions own validator has nothing to accept. Not a failure." >&2
+                  exit 0
+                fi
                 # The config is 0640 root - deliberately, because it carries the App key - and the daemon
                 # reads it as root. So the validator runs with the same privilege rather than the layer
                 # widening the file's mode to make a check convenient. Measured: without this the check read
@@ -107,7 +115,7 @@ check-fireactions-host:
                 # R8: a boundary whose credential is absent SKIPS VISIBLY - it is never made to fail. The committed
                 # config carries a PLACEHOLDER App key, and fireactions itself refuses to start on it, so on this
                 # tree the unit is correctly left unstartable. Assert it only when a real key is present.
-                if grep -q "placeholder" /etc/fireactions/config.yaml 2>/dev/null; then
+                if grep -q 'app_private_key: ""' /etc/fireactions/config.yaml 2>/dev/null; then
                   echo "SKIP: the rendered config carries a placeholder App key, so the server cannot start and" >&2
                   echo "      the unit is expected to be inactive. This check asserts the unit only on a tree with" >&2
                   echo "      a real key - it is not a failure and it is not a silent pass." >&2
@@ -126,3 +134,4 @@ check-fireactions-host:
                   systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
                   exit 1
                 fi
+

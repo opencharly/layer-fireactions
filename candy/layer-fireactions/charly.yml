@@ -31,14 +31,46 @@ layer-fireactions:
                 package:
                     - go
                     - git
+        secret_accept:
+          - name: FIREACTIONS_APP_PRIVATE_KEY
+            description: >-
+                The GitHub App private key fireactions uses to register runners. Supplied here rather
+                than baked into the config, so a deployment without it fails visibly instead of
+                shipping a placeholder App key.
+            key: charly/fireactions/app-private-key
         service:
             # ONE entry, because the init system picks the form: systemd renders a unit from the exec, and
-            # supervisord a program. The invocation is MEASURED, not guessed - built from the pinned fork and
-            # asked directly: `fireactions server --config <path>`, whose own default is
-            # /etc/fireactions/config.yaml, which is the path this layer renders.
+            # supervisord a program. The exec is a CHARLY-OWNED START SCRIPT rather than the binary itself,
+            # because the App key is a deploy-time credential the image cannot know: the script injects it
+            # from the environment `secret_accept:` provides, then execs `fireactions server --config <path>`.
             - name: fireactions
-              exec: fireactions server --config /etc/fireactions/config.yaml
+              exec: /usr/local/bin/start-fireactions.sh
         plan:
+            - run: write the charly-owned start script that injects the App key at runtime
+              id: fireactions-start-script
+              write: /usr/local/bin/start-fireactions.sh
+              mode: "0755"
+              run_as: root
+              content: |
+                #!/bin/bash
+                set -eu
+                # The image cannot know the credential, so the config ships without a usable key and this script
+                # writes it in from the environment `secret_accept:` injects. With no key the server must refuse
+                # to start and say so - a visible failure, never a placeholder that parses and then dies.
+                if [ -z "${FIREACTIONS_APP_PRIVATE_KEY:-}" ]; then
+                  echo "fireactions: FIREACTIONS_APP_PRIVATE_KEY is not set; refusing to start" >&2
+                  exit 1
+                fi
+                keyfile=/etc/fireactions/config.yaml
+                tmp=$(mktemp)
+                sed '/^  app_private_key:/d' "$keyfile" > "$tmp"
+                {
+                  printf '  app_private_key: |\n'
+                  printf '%s\n' "$FIREACTIONS_APP_PRIVATE_KEY" | sed 's/^/    /'
+                } >> "$tmp"
+                mv "$tmp" "$keyfile"
+                chmod 0640 "$keyfile"
+                exec fireactions server --config "$keyfile"
             - run: fetch the pinned source from the opencharly fork
               id: fireactions-source
               download: "https://github.com/opencharly/fireactions/archive/refs/tags/v2.0.8-oc1.tar.gz"
@@ -67,8 +99,8 @@ layer-fireactions:
                 # the bed uses - it fails visibly with a connection error when no server is running, which is
                 # the skip case the ledger asks for rather than a silent pass.
                 #
-                # The App key is NOT baked here: it belongs to `charly secrets`, and a host without it must
-                # skip visibly rather than start a server that cannot register runners.
+                # The App key is NOT baked here. It is injected at deploy time by `secret_accept:` below,
+                # and the start script writes it into this file at runtime - an image cannot know a credential.
                 bind_address: 0.0.0.0:8080
                 metrics:
                   enabled: true
@@ -77,9 +109,7 @@ layer-fireactions:
                 github:
                   app_id: 1
                   app_private_key: |
-                    -----BEGIN RSA PRIVATE KEY-----
-                    placeholder
-                    -----END RSA PRIVATE KEY-----
+                  app_private_key: ""
 
                 pools:
                 - name: charly-check
@@ -99,3 +129,8 @@ layer-fireactions:
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
+
+
+
+
+
