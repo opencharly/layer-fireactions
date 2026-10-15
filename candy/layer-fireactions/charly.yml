@@ -46,6 +46,37 @@ layer-fireactions:
             - name: fireactions
               exec: /usr/local/bin/start-fireactions.sh
         plan:
+            - run: write the ONE renderer that both the service and the bed's config check invoke (R2)
+              id: fireactions-render-script
+              write: /usr/local/bin/render-fireactions-config.sh
+              mode: "0755"
+              run_as: root
+              content: |
+                  #!/bin/bash
+                  set -eu
+                  # Render a fireactions config that carries the App key from one that does not.
+                  #
+                  # THE single implementation of that render. The service's start script and the bed's config
+                  # check both call THIS script, so the check exercises the real renderer and cannot drift from
+                  # it (R2: one canonical implementation, extracted on the second occurrence).
+                  #
+                  # usage: render-fireactions-config.sh <src-config> <dst-config>
+                  #
+                  # With FIREACTIONS_APP_PRIVATE_KEY set the operator's key is written in as-is. With it unset a
+                  # THROWAWAY RSA key is generated so the server starts and the unit is assertable; it will not
+                  # register runners. R8: the boundary runs live when the credential is there and says so
+                  # visibly when it is not - never a baked placeholder that parses and then dies.
+                  src="$1"
+                  dst="$2"
+                  key="${FIREACTIONS_APP_PRIVATE_KEY:-}"
+                  if [ -z "$key" ]; then
+                      key=$(openssl genrsa 2048 2>/dev/null)
+                  fi
+                  sed '/^  app_private_key:/d' "$src" > "$dst"
+                  {
+                      printf '  app_private_key: |\n'
+                      printf '%s\n' "$key" | sed 's/^/    /'
+                  } >> "$dst"
             - run: write the charly-owned start script that injects the App key at runtime
               id: fireactions-start-script
               write: /usr/local/bin/start-fireactions.sh
@@ -54,22 +85,20 @@ layer-fireactions:
               content: |
                 #!/bin/bash
                 set -eu
-                # The image cannot know the credential, so the config ships without a usable key and this script
-                # writes it in from the environment `secret_accept:` injects. With no key the server must refuse
-                # to start and say so - a visible failure, never a placeholder that parses and then dies.
-                  if [ -z "${FIREACTIONS_APP_PRIVATE_KEY:-}" ]; then
-                    FIREACTIONS_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
-                  fi
-                keyfile=/etc/fireactions/config.yaml
-                tmp=$(mktemp)
-                sed '/^  app_private_key:/d' "$keyfile" > "$tmp"
-                {
-                  printf '  app_private_key: |\n'
-                  printf '%s\n' "$FIREACTIONS_APP_PRIVATE_KEY" | sed 's/^/    /'
-                } >> "$tmp"
-                mv "$tmp" "$keyfile"
-                chmod 0640 "$keyfile"
-                exec fireactions server --config "$keyfile"
+                # R2: the render lives in ONE place - /usr/local/bin/render-fireactions-config.sh - which the
+                # bed's config check ALSO calls, so the check exercises the real renderer rather than a copy.
+                # This script used to carry a copy of that logic; it no longer does.
+                #
+                # The renderer injects the key `secret_accept:` provides, or a THROWAWAY RSA key when none is
+                # supplied, so the server starts and the unit is assertable (it cannot register runners). R8:
+                # the boundary runs live when the credential is there and says so visibly when it is not. The
+                # bed asserts the unit and FAILS when it is absent; it never skips.
+                src=/etc/fireactions/config.yaml
+                dst=/etc/fireactions/config.yaml.rendered
+                /usr/local/bin/render-fireactions-config.sh "$src" "$dst"
+                mv "$dst" "$src"
+                chmod 0640 "$src"
+                exec fireactions server --config "$src"
             - run: fetch the pinned source from the opencharly fork
               id: fireactions-source
               download: "https://github.com/opencharly/fireactions/archive/refs/tags/v2.0.8-oc1.tar.gz"
@@ -127,6 +156,8 @@ layer-fireactions:
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
+
+
 
 
 

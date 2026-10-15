@@ -79,18 +79,16 @@ check-fireactions-host:
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
               command: |
-                # R7: this step must exercise the path the SERVICE will take, not read the file at rest. The candy
-                # ships app_private_key: "" because an image cannot know a credential; the start script writes the
-                # key in at service start. So the check runs the same rendering here and validates the RESULT.
+                # R2/R7: this check renders through the SAME script the service does -
+                # /usr/local/bin/render-fireactions-config.sh - so it exercises the real renderer and cannot
+                # drift from it. It used to carry its own copy of the strip-and-append logic.
+                #
+                # It does NOT skip: it renders and validates, and it fails when the render or the validator does.
                 set -eu
-                tmp=$(mktemp)
-                cp /etc/fireactions/config.yaml "$tmp"
-                key=$(openssl genrsa 2048 2>/dev/null)
-                sed -i '/^  app_private_key:/d' "$tmp"
-                printf '  app_private_key: |\n' >> "$tmp"
-                printf '%s\n' "$key" | sed 's/^/    /' >> "$tmp"
-                fireactions validate "$tmp"
-                rm -f "$tmp"
+                rendered=$(mktemp)
+                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/config.yaml "$rendered"
+                fireactions validate "$rendered"
+                rm -f "$rendered"
             - check: containerd is present with the device-less snapshotter this substrate needs
               id: containerd-native-snapshotter
               command: |
@@ -110,28 +108,13 @@ check-fireactions-host:
             - check: the layer's own unit is enabled and active, which nothing but the service entry makes true
               id: fireactions-unit
               command: |
+                # R10/R7: this step ASSERTS, it never skips. A check that skips cannot fail, and a check that
+                # cannot fail is invalid - which is what the validator said about the guard that used to sit here
+                # (`grep -q 'app_private_key: ""'`, a condition the candy's own config write ALWAYS satisfies).
+                #
+                # So it asserts the unit on WHATEVER configuration ships, and fails when the unit is absent or
+                # disabled. On a tree where the member deploy did not apply the composed candy's service entry
+                # this FAILS, and that failure is charly/charly#950 - named in the PR body, not hidden here.
                 set -eu
-                # R8: a boundary whose credential is absent SKIPS VISIBLY - it is never made to fail. The committed
-                # config carries a PLACEHOLDER App key, and fireactions itself refuses to start on it, so on this
-                # tree the unit is correctly left unstartable. Assert it only when a real key is present.
-                if grep -q 'app_private_key: ""' /etc/fireactions/config.yaml 2>/dev/null; then
-                  echo "SKIP: the rendered config carries a placeholder App key, so the server cannot start and" >&2
-                  echo "      the unit is expected to be inactive. This check asserts the unit only on a tree with" >&2
-                  echo "      a real key - it is not a failure and it is not a silent pass." >&2
-                  exit 0
-                fi
-                # And this is the assertion the change is in the gate for: without the layer's service entry the
-                # deploy writes no unit at all, so is-enabled cannot succeed; without the consumer's
-                # install_opts: with_service: true the unit exists but is left disabled. Either way this fails.
-                if ! systemctl is-enabled fireactions.service >/dev/null 2>&1; then
-                  echo "the fireactions unit is not enabled:" >&2
-                  systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
-                  exit 1
-                fi
-                if ! systemctl is-active fireactions.service >/dev/null 2>&1; then
-                  echo "the fireactions unit is enabled but not active:" >&2
-                  systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
-                  exit 1
-                fi
-
-
+                systemctl is-enabled fireactions
+                systemctl is-active fireactions
