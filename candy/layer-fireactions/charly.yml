@@ -15,6 +15,13 @@ layer-fireactions:
             snapshotter configuration this substrate needs so a host without a devmapper device can still
             run pools. Installs the binary, and hands the running contract — config, unit, pool probe — to
             the bed that asserts it.
+            
+            HOSTING A RUNNING SERVICE: this candy declares `service: fireactions`. On a machine venue its
+            systemd unit is written and enabled only when the CONSUMER's deploy sets
+            `install_opts: with_service: true` - the same gate `distro-cachyos` and `box/cachyos` set for
+            sddm, and the org-wide way for a consumer to say it wants a service actually enabled. A
+            consumer that omits it still gets the binary, the rendered config and the pool CLI, but no
+            enabled unit. The bed in this repo sets it, so it exercises the documented consumer path.
         distro:
             fedora:
                 package:
