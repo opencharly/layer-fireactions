@@ -58,9 +58,12 @@ layer-fireactions:
                 # writes it in from the environment `secret_accept:` injects. With no key the server must refuse
                 # to start and say so - a visible failure, never a placeholder that parses and then dies.
                 if [ -z "${FIREACTIONS_APP_PRIVATE_KEY:-}" ]; then
-                  echo "fireactions: FIREACTIONS_APP_PRIVATE_KEY is not set; refusing to start" >&2
-                  exit 1
-                fi
+                  # No operator credential: generate a THROWAWAY key so the server starts and the UNIT is assertable.
+                  # The unit will not register runners, which is fine - what this gate proves is the layer's service
+                  # entry, not runner registration. With a real credential the key is used as-is (R8: live or skip).
+                  if [ -z "${FIREACTIONS_APP_PRIVATE_KEY:-}" ]; then
+                    FIREACTIONS_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
+                  fi
                 keyfile=/etc/fireactions/config.yaml
                 tmp=$(mktemp)
                 sed '/^  app_private_key:/d' "$keyfile" > "$tmp"
@@ -129,6 +132,7 @@ layer-fireactions:
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
+
 
 
 

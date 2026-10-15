@@ -79,19 +79,18 @@ check-fireactions-host:
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
               command: |
-                # R8: the layer ships a KEYLESS config - the App key is a deploy-time credential the image cannot
-                # know, so `fireactions validate` has nothing to check here. A boundary whose credential is absent
-                # skips visibly; it is never made to fail. This is not a silent pass: it says so on stderr.
-                if grep -q 'app_private_key: ""' /etc/fireactions/config.yaml 2>/dev/null; then
-                  echo "SKIP: the rendered config carries no App key (it is injected at deploy time by the start" >&2
-                  echo "      script), so fireactions own validator has nothing to accept. Not a failure." >&2
-                  exit 0
-                fi
-                # The config is 0640 root - deliberately, because it carries the App key - and the daemon
-                # reads it as root. So the validator runs with the same privilege rather than the layer
-                # widening the file's mode to make a check convenient. Measured: without this the check read
-                # as uid 1000 and failed with permission denied.
-                sudo -n /usr/local/bin/fireactions validate /etc/fireactions/config.yaml
+                # R7: this step must exercise the path the SERVICE will take, not read the file at rest. The candy
+                # ships app_private_key: "" because an image cannot know a credential; the start script writes the
+                # key in at service start. So the check runs the same rendering here and validates the RESULT.
+                set -eu
+                tmp=$(mktemp)
+                cp /etc/fireactions/config.yaml "$tmp"
+                key=$(openssl genrsa 2048 2>/dev/null)
+                sed -i '/^  app_private_key:/d' "$tmp"
+                printf '  app_private_key: |\n' >> "$tmp"
+                printf '%s\n' "$key" | sed 's/^/    /' >> "$tmp"
+                fireactions validate "$tmp"
+                rm -f "$tmp"
             - check: containerd is present with the device-less snapshotter this substrate needs
               id: containerd-native-snapshotter
               command: |
@@ -134,4 +133,5 @@ check-fireactions-host:
                   systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
                   exit 1
                 fi
+
 
