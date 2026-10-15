@@ -99,3 +99,25 @@ check-fireactions-host:
                   systemctl status containerd.service --no-pager 2>&1 | head -8 >&2
                   exit 1
                 fi
+
+            - check: the layer's own unit is enabled and active, which nothing but the service entry makes true
+              id: fireactions-unit
+              command: |
+                set -eu
+                # This step is the reason the change is in the gate at all: the layer declares `service: fireactions`,
+                # and NOTHING here passed before this step existed. Without the declaration the deploy writes no unit
+                # at all, so is-enabled cannot succeed; without the consumer's install_opts: with_service: true the
+                # unit exists but is left disabled. Either way this step fails, which is what R10 asks of a check.
+                if ! systemctl is-enabled fireactions.service >/dev/null 2>&1; then
+                  echo "the fireactions unit is not enabled:" >&2
+                  systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
+                  echo "the layer's service: entry creates the unit; the consumer's install_opts: with_service: true" >&2
+                  echo "is what enables it. Without both, a deploy prepares everything and leaves no unit behind." >&2
+                  exit 1
+                fi
+                if ! systemctl is-active fireactions.service >/dev/null 2>&1; then
+                  echo "the fireactions unit is enabled but not active:" >&2
+                  systemctl status fireactions.service --no-pager 2>&1 | head -8 >&2
+                  exit 1
+                fi
+
