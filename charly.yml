@@ -48,7 +48,7 @@ fireactions-vm-host:
         candy:
             - layer-fireactions
             - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
-            - '@github.com/opencharly/layer-containerd/candy/layer-containerd:v2026.288.0625'
+            - '@github.com/opencharly/layer-containerd/candy/layer-containerd:v2026.289.0839'
 
 check-fireactions-host:
     vm:
