@@ -13,8 +13,8 @@ layer-fireactions:
         description: |
             Fireactions, built from the pinned opencharly fork at v2.0.8-oc1, with the containerd
             snapshotter configuration this substrate needs so a host without a devmapper device can still
-            run pools. Installs the binary, and hands the running contract — config, unit, pool probe — to
-            the bed that asserts it.
+            run pools. Installs the binary, and hands the running contract — rendered config, systemd unit,
+            and the containerd snapshotter it serves — to the bed that asserts it.
             
             HOSTING A RUNNING SERVICE: this candy declares `service: fireactions`. On a machine venue its
             systemd unit is written only when the CONSUMER's deploy sets

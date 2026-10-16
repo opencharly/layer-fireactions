@@ -57,8 +57,9 @@ check-fireactions-host:
         description: >-
             WI-9's gate on a disposable guest: the layer's config is validated by fireactions OWN validator,
             and the containerd the pools need is present and configured with the snapshotter that needs no
-            block device. The service and pool checks need the GitHub App key, which is a credential the
-            operator holds - the ledger names that as the visible-skip case.
+            block device. There is NO pool check and NO visible skip: the renderer writes a THROWAWAY RSA key
+            when no App key is supplied, so every check below runs and `fireactions-unit` requires the unit to
+            be enabled and active - it FAILS when the unit is absent rather than skipping.
         check-fireactions-host-member:
             local:
                 from: fireactions-vm-host
