@@ -147,6 +147,7 @@ check-fireactions-host:
                 # (`grep -q 'app_private_key: ""'`, a condition the candy's own config write ALWAYS satisfies).
                 #
                 # So it asserts the unit on WHATEVER configuration ships, and fails when the unit is absent or
+                # inactive, rather than skipping.
                 set -eu
                 # R2/R7: the unit NAME is discovered, not hardcoded. charly installs a layer's
                 # service under charly-<layer>-<name>.service, so asserting the bare `fireactions`
