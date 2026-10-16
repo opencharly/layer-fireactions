@@ -189,7 +189,16 @@ layer-fireactions:
                 # /etc/fireactions/config.yaml directly - which is the RENDERER's output, carries the key, is
                 # 0640 root, and does not exist until the service has run - so it failed for reasons unrelated
                 # to the renderer. This tests the renderer itself and races nothing.
-                tmp=$(mktemp); /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$tmp"; fireactions validate "$tmp"; rm -f "$tmp"
+                # R7: the STATUS of this step must be the render/validate result. As a `;`-chain it
+                # was the trailing `rm -f`'s status, so the step returned 0 even when the renderer was
+                # absent, the render failed, or the validator rejected the file - a check that cannot
+                # fail. `set -eu` aborts on the first failure with that failure's status, the trap does
+                # the cleanup, and the validator is the last statement so its verdict is the step's.
+                set -eu
+                tmp=$(mktemp)
+                trap 'rm -f "$tmp"' EXIT
+                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$tmp"
+                fireactions validate "$tmp"
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
