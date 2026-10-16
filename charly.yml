@@ -91,7 +91,6 @@ check-fireactions-host:
                 rm -f "$rendered"
             - check: the daemon SERVES the snapshotter this substrate DECLARES (blockfile)
               id: containerd-blockfile-served
-              run_as: root
               command: |
                 set -eu
                 if [ ! -f /etc/containerd/config.toml ]; then
