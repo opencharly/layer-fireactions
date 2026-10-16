@@ -48,6 +48,26 @@ fireactions-vm-host:
             - layer-fireactions
             - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
             - '@github.com/opencharly/layer-containerd/candy/layer-containerd:v2026.289.0839'
+        # MEASURED GAP (2026-10-16): the bed PASSED (steps=15, exit 0) on a tree carrying
+        # opencharly/charly#918, and `check-live-check-fireactions-host-member` logged
+        # "No plan steps defined for this image", because this template - the local member the bed
+        # resolves via `from: fireactions-vm-host` - declared no plan. A bed child whose plan
+        # contributes no steps is recorded `ok: true` (plugin-check no_plan_skip.go, plugin-check#110),
+        # so a phase that asserted NOTHING was indistinguishable from one that asserted everything.
+        # The assertion belongs HERE, on the template: "the services this pool host declares are
+        # applied" is a property of the host, not of the bed that composes it.
+        plan:
+            - check: the containerd unit this pool host declares is enabled and active
+              id: containerd-service-applied
+              command: |
+                set -eu
+                # `enabled` and `active` are the two states charly#918 leaves wrong: a candy whose
+                # service: block is not applied yields a unit that is loaded, disabled and inactive.
+                systemctl is-enabled containerd
+                systemctl is-active containerd
+                # and the socket the layer exists to provide must be there - a unit can be enabled
+                # and active while the daemon it names never started listening.
+                test -S /run/containerd/containerd.sock
 
 check-fireactions-host:
     vm:
