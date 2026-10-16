@@ -128,9 +128,10 @@ layer-fireactions:
               id: fireactions-config
               write: /etc/fireactions/source.yaml
               mode: "0644"
-              # 0644, not 0640: the bed config check runs the shared renderer as the guest user and
-              # must READ this file. It carries no secret - the App key arrives at runtime via
-              # `secret_accept:`, never from here (see the service entry above).
+              # 0644, not 0640: THIS FILE CARRIES NO SECRET. `source.yaml` is the key-free source the
+              # candy writes and the renderer reads; the App key is injected at runtime into
+              # `config.yaml`, which the start script creates 0640 (see the service entry above). The
+              # mode here is therefore about the file's CONTENT, not about who reads it.
               run_as: root
               content: |
                 # Written by the charly fireactions layer. The shape is the fork's own testdata, VERIFIED
@@ -187,14 +188,3 @@ layer-fireactions:
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
-
-
-
-
-
-
-
-
-
-
-

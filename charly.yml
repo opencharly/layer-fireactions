@@ -90,8 +90,9 @@ check-fireactions-host:
                 /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$rendered"
                 fireactions validate "$rendered"
                 rm -f "$rendered"
-            - check: containerd is present with the device-less snapshotter this substrate needs
-              id: containerd-native-snapshotter
+            - check: the daemon SERVES the snapshotter this substrate DECLARES (blockfile)
+              id: containerd-blockfile-served
+              run_as: root
               command: |
                 set -eu
                 if [ ! -f /etc/containerd/config.toml ]; then
@@ -99,13 +100,17 @@ check-fireactions-host:
                   ls -la /etc/containerd 2>&1 | head -4 >&2
                   exit 1
                 fi
-                grep -q 'snapshotter = "native"' /etc/containerd/config.toml
                 if ! systemctl is-active containerd.service >/dev/null 2>&1; then
                   echo "containerd.service is not active:" >&2
                   systemctl status containerd.service --no-pager 2>&1 | head -8 >&2
                   exit 1
                 fi
-
+                # Assert the DAEMON-REPORTED served set, not a grep of the rendered file. The candy
+                # declares `containerd.snapshotter: blockfile` and the fork refuses native/overlayfs
+                # for a root drive, so the previous form of this check - a grep of the CRI plugin's
+                # default - passed while the substrate could not start (MEASURED, and the reason this
+                # check no longer asserts a value the substrate does not use).
+                ctr plugins ls | awk '$1 == "io.containerd.snapshotter.v1" && $2 == "blockfile" { print $NF }' | grep -qx ok
             - check: the layer's own unit is enabled and active, which nothing but the service entry makes true
               id: fireactions-unit
               command: |
