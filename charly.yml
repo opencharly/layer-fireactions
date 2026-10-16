@@ -120,7 +120,7 @@ check-fireactions-host:
                   sudo -n ctr plugins ls 2>&1 | head -20 >&2
                   exit 1; }
                 cat /tmp/ctr-snap.txt
-                if ! grep -E 'snapshotter[[:space:]]+blockfile[[:space:]].*[[:space:]]ok' /tmp/ctr-snap.txt >/dev/null 2>&1; then
+                if ! grep -E 'snapshotter.*[[:space:]]blockfile[[:space:]].*[[:space:]]ok' /tmp/ctr-snap.txt >/dev/null 2>&1; then
                   echo "the DECLARED blockfile snapshotter is not served as ok - the rows above are the whole answer" >&2
                   exit 1
                 fi
