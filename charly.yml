@@ -69,6 +69,24 @@ check-fireactions-host:
                 # ("--with-services | systemd unit writes; systemctl enable --now").
                 install_opts:
                     with_service: true
+                # MEASURED GAP (2026-10-16): without this the bed PASSES while asserting NOTHING about the
+                # member - check-live-check-fireactions-host-member.log says "No plan steps defined for
+                # this image", so the R10 sequence reported PASS (steps=15) on a tree carrying
+                # opencharly/charly#918. A bed that cannot fail is not a gate. This makes the service
+                # application the thing under test - the claim the comment above already makes for
+                # `fireactions-unit` ("it FAILS when the unit is absent rather than skipping").
+                plan:
+                    - check: the containerd unit the candy declares is enabled and active on this member
+                      id: containerd-service-applied
+                      command: |
+                        set -eu
+                        # `enabled` and `active` are the two states charly#918 leaves wrong: a candy whose
+                        # service: block is not applied yields a unit that is loaded, disabled and inactive.
+                        systemctl is-enabled containerd
+                        systemctl is-active containerd
+                        # and the socket the layer exists to provide must be there - a unit can be
+                        # enabled+active while the daemon it names never started listening.
+                        test -S /run/containerd/containerd.sock
         plan:
             - check: the pinned build is installed and it is the fork
               id: fireactions-binary
