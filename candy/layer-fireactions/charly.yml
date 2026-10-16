@@ -142,8 +142,10 @@ layer-fireactions:
                 # Written by the charly fireactions layer. The shape is the fork's own testdata, VERIFIED
                 # against the real binary: `fireactions validate <file>` answers "is valid" for exactly this
                 # document (measured while building this layer), and `fireactions pools list` is the probe
-                # the bed uses - it fails visibly with a connection error when no server is running, which is
-                # the skip case the ledger asks for rather than a silent pass.
+                # the bed asserts instead: `fireactions-unit` requires the layer's own unit to be enabled and
+                # active, so a server that does not run FAILS the bed rather than skipping it. `fireactions
+                # pools list` needs a live server and a registered pool and is therefore not a check here -
+                # it would report on the GitHub App, not on this layer.
                 #
                 # The App key is NOT baked here. It is injected at deploy time by `secret_accept:` below,
                 # and the start script writes it into this file at runtime - an image cannot know a credential.
