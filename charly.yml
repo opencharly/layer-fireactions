@@ -87,7 +87,7 @@ check-fireactions-host:
                 # It does NOT skip: it renders and validates, and it fails when the render or the validator does.
                 set -eu
                 rendered=$(mktemp)
-                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/config.yaml "$rendered"
+                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$rendered"
                 fireactions validate "$rendered"
                 rm -f "$rendered"
             - check: containerd is present with the device-less snapshotter this substrate needs
