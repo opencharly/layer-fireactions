@@ -4,3 +4,157 @@ discover:
       recursive: true
     - path: candy
       recursive: true
+
+# =============================================================================
+# WI-9's gate: fires on a DISPOSABLE VM, because fireactions supervises containerd
+# and drives Firecracker - a root daemon that a pod cannot host (the lesson
+# layer-containerd recorded when a uid-1000 supervisord could not setuid).
+#
+# What the checks prove, and what they do not. The renderer writes a THROWAWAY RSA key
+# when no App key is supplied and says so on stderr, so the server STARTS and the unit is
+# assertable - MEASURED: all 5 checks below pass with no App key present. What that
+# state does NOT do is register runners, and no check here claims it does. The config's
+# own validator is the product's own tool, run in the plan.
+# =============================================================================
+fireactions-vm-base:
+    vm:
+        source:
+            kind: cloud_image
+            url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
+            base_user: arch
+            distro: arch
+        backend: libvirt
+        disk_size: 20G
+        ram: 4G
+        cpu: 2
+        machine: q35
+        firmware: bios
+        ssh:
+            port_auto: true
+            key_source: generate
+        cloud_init:
+            timezone: UTC
+            package:
+                - sudo
+
+fireactions-vm-host:
+    local:
+        description: >-
+            A fireactions POOL HOST inside a guest: the layer itself (the pinned v2.0.8-oc1 build and its
+            validated config), the pinned Firecracker release and kernel it launches pools with, and
+            containerd from the distro - which the layer's own snapshotter choice is what makes usable on a
+            host with no devmapper device.
+        candy:
+            - layer-fireactions
+            - '@github.com/opencharly/layer-firecracker/candy/layer-firecracker:v2026.287.1531'
+            - '@github.com/opencharly/layer-containerd/candy/layer-containerd:v2026.289.0839'
+
+check-fireactions-host:
+    vm:
+        from: fireactions-vm-base
+        disposable: true
+        lifecycle: dev
+        description: >-
+            WI-9's gate on a disposable guest: the layer's config is validated by fireactions OWN validator,
+            and the containerd the pools need is present and configured with the snapshotter that needs no
+            block device. There is NO pool check and NO visible skip: the renderer writes a THROWAWAY RSA key
+            when no App key is supplied, so every check below runs and `fireactions-unit` requires the unit to
+            be enabled and active - it FAILS when the unit is absent rather than skipping.
+        check-fireactions-host-member:
+            local:
+                from: fireactions-vm-host
+                # MEASURED: the deploy gate that writes systemd units and runs `systemctl enable --now`.
+                # Without it the deploy prepares everything and the unit stays loaded, disabled and
+                # inactive - which is exactly what this bed saw, and the skill states the gate explicitly
+                # ("--with-services | systemd unit writes; systemctl enable --now").
+                install_opts:
+                    with_service: true
+        plan:
+            - check: the pinned build is installed and it is the fork
+              id: fireactions-binary
+              command: |
+                set -eu
+                test -x /usr/local/bin/fireactions
+                fireactions --help >/dev/null
+            - check: the renderer uses the App key when one IS supplied, and says so
+              id: fireactions-credential-present-path
+              command: |
+                set -eu
+                # The bed has no App key, so the ABSENT path is what the service exercises here.
+                # This check exercises the OTHER branch - the one a real deployment uses - so the
+                # renderer is proven on both sides of its branch point rather than one.
+                work=$(mktemp -d)
+                key="$work/key.pem"; openssl genrsa 2048 > "$key" 2>/dev/null
+                FIREACTIONS_APP_PRIVATE_KEY="$(cat "$key")" \
+                  /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$work/out.yaml" \
+                  2> "$work/stderr.txt"
+                grep -q "using the App key supplied at deploy time" "$work/stderr.txt"
+                grep -q "BEGIN PRIVATE KEY" "$work/key.pem"
+                fireactions validate "$work/out.yaml"
+                rm -rf "$work"
+                echo "credential-present path: rendered with the supplied key and validated"
+            - check: the rendered config is one fireactions own validator accepts
+              id: fireactions-config-valid
+              command: |
+                # R2/R7: this check renders through the SAME script the service does -
+                # /usr/local/bin/render-fireactions-config.sh - so it exercises the real renderer and cannot
+                # drift from it. It used to carry its own copy of the strip-and-append logic.
+                #
+                # It does NOT skip: it renders and validates, and it fails when the render or the validator does.
+                set -eu
+                rendered=$(mktemp)
+                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$rendered"
+                fireactions validate "$rendered"
+                rm -f "$rendered"
+            - check: the daemon SERVES the snapshotter this substrate DECLARES (blockfile)
+              id: containerd-blockfile-served
+              command: |
+                set -eu
+                if [ ! -f /etc/containerd/config.toml ]; then
+                  echo "no /etc/containerd/config.toml; /etc/containerd holds:" >&2
+                  ls -la /etc/containerd 2>&1 | head -4 >&2
+                  exit 1
+                fi
+                if ! systemctl is-active containerd.service >/dev/null 2>&1; then
+                  echo "containerd.service is not active:" >&2
+                  systemctl status containerd.service --no-pager 2>&1 | head -8 >&2
+                  exit 1
+                fi
+                # Assert the DAEMON-REPORTED served set, not a grep of the rendered file. The candy
+                # declares `containerd.snapshotter: blockfile` and the fork refuses native/overlayfs
+                # for a root drive, so the previous form of this check - a grep of the CRI plugin's
+                # default - passed while the substrate could not start (MEASURED, and the reason this
+                # check no longer asserts a value the substrate does not use).
+                # `run_as:` is NOT honoured on a `check:` step (MEASURED: plugin-check has no run_as
+                # reference), so a bare `ctr` runs as the guest user and cannot reach the daemon socket -
+                # it exits with only a warning and the grep fails. `sudo -n ctr` is the mechanism the
+                # sibling check in opencharly/layer-containerd proved, and the rows are written to a file
+                # so a warning line cannot be mistaken for the answer.
+                sudo -n ctr plugins ls 2>&1 | grep -E 'TYPE|snapshotter' > /tmp/ctr-snap.txt || {
+                  echo "ctr plugins ls produced no snapshotter rows:" >&2
+                  sudo -n ctr plugins ls 2>&1 | head -20 >&2
+                  exit 1; }
+                cat /tmp/ctr-snap.txt
+                if ! grep -E 'snapshotter.*[[:space:]]blockfile[[:space:]].*[[:space:]]ok' /tmp/ctr-snap.txt >/dev/null 2>&1; then
+                  echo "the DECLARED blockfile snapshotter is not served as ok - the rows above are the whole answer" >&2
+                  exit 1
+                fi
+                echo "blockfile snapshotter: ok"
+            - check: the layer's own unit is enabled and active, which nothing but the service entry makes true
+              id: fireactions-unit
+              command: |
+                # R10/R7: this step ASSERTS, it never skips. A check that skips cannot fail, and a check that
+                # cannot fail is invalid - which is what the validator said about the guard that used to sit here
+                # (`grep -q 'app_private_key: ""'`, a condition the candy's own config write ALWAYS satisfies).
+                #
+                # So it asserts the unit on WHATEVER configuration ships, and fails when the unit is absent or
+                # inactive, rather than skipping.
+                set -eu
+                # R2/R7: the unit NAME is discovered, not hardcoded. charly installs a layer's
+                # service under charly-<layer>-<name>.service, so asserting the bare `fireactions`
+                # asked about a unit that never exists and made a correct guest look broken.
+                unit=$(systemctl list-unit-files --type=service --no-legend \
+                  | awk '{print $1}' | grep -E '(^|-)fireactions\.service$' | head -1)
+                test -n "$unit"
+                systemctl is-enabled "$unit"
+                systemctl is-active "$unit"

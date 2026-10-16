@@ -13,8 +13,15 @@ layer-fireactions:
         description: |
             Fireactions, built from the pinned opencharly fork at v2.0.8-oc1, with the containerd
             snapshotter configuration this substrate needs so a host without a devmapper device can still
-            run pools. Installs the binary, and hands the running contract — config, unit, pool probe — to
-            the bed that asserts it.
+            run pools. Installs the binary, and hands the running contract — rendered config, systemd unit,
+            and the containerd snapshotter it serves — to the bed that asserts it.
+            
+            HOSTING A RUNNING SERVICE: this candy declares `service: fireactions`. On a machine venue its
+            systemd unit is written only when the CONSUMER's deploy sets
+            `install_opts: with_service: true` - the same gate `distro-cachyos` and `box/cachyos` set for
+            sddm, and the org-wide way for a consumer to say it wants a service actually enabled. A
+            consumer that omits it still gets the binary, the rendered config and the pool CLI, but no
+            enabled unit. The bed in this repo sets it, so it exercises the documented consumer path.
         distro:
             fedora:
                 package:
@@ -24,7 +31,88 @@ layer-fireactions:
                 package:
                     - go
                     - git
+        secret_accept:
+          - name: FIREACTIONS_APP_PRIVATE_KEY
+            description: >-
+                The GitHub App private key fireactions uses to register runners. Supplied here
+                rather than baked into the config, which never carries a key. When it is ABSENT
+                the renderer says so ON STDERR and writes a THROWAWAY RSA key, so the unit is
+                assertable and the boundary is visible; a deployment in that state will not
+                register runners.
+            key: charly/fireactions/app-private-key
+        service:
+            # ONE entry, because the init system picks the form: systemd renders a unit from the exec, and
+            # supervisord a program. The exec is a CHARLY-OWNED START SCRIPT rather than the binary itself,
+            # because the App key is a deploy-time credential the image cannot know: the script injects it
+            # from the environment `secret_accept:` provides, then execs `fireactions server --config <path>`.
+            - name: fireactions
+              exec: /usr/local/bin/start-fireactions.sh
+              enable: true
         plan:
+            - run: write the ONE renderer that both the service and the bed's config check invoke (R2)
+              id: fireactions-render-script
+              write: /usr/local/bin/render-fireactions-config.sh
+              mode: "0755"
+              run_as: root
+              content: |
+                  #!/bin/bash
+                  set -eu
+                  # Render a fireactions config that carries the App key from one that does not.
+                  #
+                  # THE single implementation of that render. The service's start script and the bed's config
+                  # check both call THIS script, so the check exercises the real renderer and cannot drift from
+                  # it (R2: one canonical implementation, extracted on the second occurrence).
+                  #
+                  # usage: render-fireactions-config.sh <src-config> <dst-config>
+                  #
+                  # With FIREACTIONS_APP_PRIVATE_KEY set the operator's key is written in as-is. With it unset a
+                  # THROWAWAY RSA key is generated so the server starts and the unit is assertable; it will not
+                  # register runners. R8: the boundary runs live when the credential is there and says so
+                  # visibly when it is not - never a baked placeholder that parses and then dies.
+                  src="$1"
+                  dst="$2"
+                  key="${FIREACTIONS_APP_PRIVATE_KEY:-}"
+                  if [ -n "$key" ]; then
+                    echo "render-fireactions-config: using the App key supplied at deploy time" >&2
+                  else
+                    echo "render-fireactions-config: FIREACTIONS_APP_PRIVATE_KEY is UNSET - writing a THROWAWAY RSA key so the unit is assertable; this deployment will NOT register runners" >&2
+                    key=$(openssl genrsa 2048 2>/dev/null)
+                  fi
+                  # R2/idempotence: strip the key's INTRODUCER *and its payload*. The old `sed` deleted only the
+                  # two-space header, so a re-render of an already-rendered file left the previous PEM behind and
+                  # appended another - the document grew by a key per service restart and eventually carried a PEM
+                  # with no header (yaml: line 30). awk skips the header and every line indented under it.
+                  # R7: strip any existing key block AND insert the new one INSIDE the `github:` mapping.
+                  # The old form stripped in place and APPENDED AT EOF, so the key landed at the document's TOP
+                  # LEVEL - the right indent in the WRONG PLACE - and `fireactions validate` reported
+                  # Config.GitHub.AppPrivateKey as 'required' for absent, empty AND populated inputs alike.
+                  awk -v key="$key" '
+                    /^  app_private_key:/ { skip=1; next }
+                    skip && /^    /   { next }      # payload only: a BLANK line after the key belongs to the next block, so it must survive
+                    { skip=0; print }
+                    /^  app_id:/ { print "  app_private_key: |"; n=split(key, B, "\n"); for (i=1;i<=n;i++) print "    " B[i] }
+                  ' "$src" > "$dst"
+            - run: write the charly-owned start script that injects the App key at runtime
+              id: fireactions-start-script
+              write: /usr/local/bin/start-fireactions.sh
+              mode: "0755"
+              run_as: root
+              content: |
+                #!/bin/bash
+                set -eu
+                # R2: the render lives in ONE place - /usr/local/bin/render-fireactions-config.sh - which the
+                # bed's config check ALSO calls, so the check exercises the real renderer rather than a copy.
+                # This script used to carry a copy of that logic; it no longer does.
+                #
+                # The renderer injects the key `secret_accept:` provides, or a THROWAWAY RSA key when none is
+                # supplied, so the server starts and the unit is assertable (it cannot register runners). R8:
+                # the boundary runs live when the credential is there and says so visibly when it is not. The
+                # bed asserts the unit and FAILS when it is absent; it never skips.
+                src=/etc/fireactions/source.yaml    # the SOURCE the candy writes: readable, key-free
+                dst=/etc/fireactions/config.yaml    # the RENDERED config: the service's own file, 0640, carries the key
+                /usr/local/bin/render-fireactions-config.sh "$src" "$dst"
+                chmod 0640 "$dst"
+                exec fireactions server --config "$dst"
             - run: fetch the pinned source from the opencharly fork
               id: fireactions-source
               download: "https://github.com/opencharly/fireactions/archive/refs/tags/v2.0.8-oc1.tar.gz"
@@ -41,6 +129,79 @@ layer-fireactions:
             - check: the binary is installed and answers
               id: fireactions-installed
               command: test -x /usr/local/bin/fireactions && fireactions --help >/dev/null
+            - run: render the server configuration fireactions will read
+              id: fireactions-config
+              write: /etc/fireactions/source.yaml
+              mode: "0644"
+              # 0644, not 0640: THIS FILE CARRIES NO SECRET. `source.yaml` is the key-free source the
+              # candy writes and the renderer reads; the App key is injected at runtime into
+              # `config.yaml`, which the start script creates 0640 (see the service entry above). The
+              # mode here is therefore about the file's CONTENT, not about who reads it.
+              run_as: root
+              content: |
+                # Written by the charly fireactions layer. The shape is the fork's own testdata, VERIFIED
+                # against the real binary: `fireactions validate <file>` answers "is valid" for exactly this
+                # document (measured while building this layer).
+                #
+                # `fireactions pools list` is deliberately NOT what the bed runs: it needs a live server AND a
+                # registered pool, so it would report on the GitHub App rather than on this layer. The bed
+                # asserts the layer instead - `fireactions-unit` requires the layer's own unit to be enabled and
+                # active, so a server that does not run FAILS the bed rather than skipping it.
+                #
+                # The App key is NOT baked here. It is injected at deploy time by `secret_accept:` below,
+                # and the start script writes it into this file at runtime - an image cannot know a credential.
+                # The containerd connection. All three fields are REQUIRED by the fork (server/config.go:
+                # ContainerdConfig). Declaring them is what stops the fork's compatibility default
+                # (`devmapper`) from applying: MEASURED on the live guest as
+                #   containerd: snapshotter "devmapper" is not served by this containerd
+                # with `ctr plugins ls` reporting devmapper `skip`. `blockfile` is the file-backed
+                # snapshotter that needs no LVM thin pool and CAN back a microVM root drive; the fork
+                # refuses `native`/`overlayfs` for that role by construction
+                # (SnapshotterBacksRootDrive accepts only devmapper and blockfile). R3: no sleep, no
+                # retry, no fallback - the value is declared and the daemon is asserted to serve it.
+                containerd:
+                  address: /run/containerd/containerd.sock
+                  namespace: default
+                  snapshotter: blockfile
+                
+                bind_address: 0.0.0.0:8080
+                metrics:
+                  enabled: true
+                  address: 127.0.0.1:8081
+
+                github:
+                  app_id: 1
+                  app_private_key: ""
+
+                pools:
+                - name: charly-check
+                  replicas: 0
+                  runner:
+                    name: charly-check
+                    image: ghcr.io/hostinger/fireactions/runner:ubuntu-20.04-x64-2.310.2
+                    image_pull_policy: IfNotPresent
+                    group_id: 1
+                    organization: opencharly
+                    labels: [self-hosted, charly-check]
+                  firecracker:
+                    binary_path: /usr/local/bin/firecracker
+            - check: the configuration this layer rendered is one fireactions accepts
+              id: fireactions-config-valid
+              command: |
+                # R2/R7: render from the SOURCE into a temporary destination and validate THAT. The old form read
+                # /etc/fireactions/config.yaml directly - which is the RENDERER's output, carries the key, is
+                # 0640 root, and does not exist until the service has run - so it failed for reasons unrelated
+                # to the renderer. This tests the renderer itself and races nothing.
+                # R7: the STATUS of this step must be the render/validate result. As a `;`-chain it
+                # was the trailing `rm -f`'s status, so the step returned 0 even when the renderer was
+                # absent, the render failed, or the validator rejected the file - a check that cannot
+                # fail. `set -eu` aborts on the first failure with that failure's status, the trap does
+                # the cleanup, and the validator is the last statement so its verdict is the step's.
+                set -eu
+                tmp=$(mktemp)
+                trap 'rm -f "$tmp"' EXIT
+                /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$tmp"
+                fireactions validate "$tmp"
             - check: the source the binary was built from is the fork, not upstream
               id: fireactions-source-is-the-fork
               command: grep -rq "devmapper\|snapshotter" /opt/fireactions-src/fireactions-*/cmd/fireactions/main.go
