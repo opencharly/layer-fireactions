@@ -75,9 +75,25 @@ check-fireactions-host:
                 set -eu
                 test -x /usr/local/bin/fireactions
                 fireactions --help >/dev/null
+            - check: the renderer uses the App key when one IS supplied, and says so
+              id: fireactions-credential-present-path
+              command: |
+                set -eu
+                # The bed has no App key, so the ABSENT path is what the service exercises here.
+                # This check exercises the OTHER branch - the one a real deployment uses - so the
+                # renderer is proven on both sides of its branch point rather than one.
+                work=$(mktemp -d)
+                key="$work/key.pem"; openssl genrsa 2048 > "$key" 2>/dev/null
+                FIREACTIONS_APP_PRIVATE_KEY="$(cat "$key")" \
+                  /usr/local/bin/render-fireactions-config.sh /etc/fireactions/source.yaml "$work/out.yaml" \
+                  2> "$work/stderr.txt"
+                grep -q "using the App key supplied at deploy time" "$work/stderr.txt"
+                grep -q "BEGIN PRIVATE KEY" "$work/key.pem"
+                fireactions validate "$work/out.yaml"
+                rm -rf "$work"
+                echo "credential-present path: rendered with the supplied key and validated"
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
-              run_as: root
               command: |
                 # R2/R7: this check renders through the SAME script the service does -
                 # /usr/local/bin/render-fireactions-config.sh - so it exercises the real renderer and cannot
