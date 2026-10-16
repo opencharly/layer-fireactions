@@ -78,6 +78,7 @@ check-fireactions-host:
                 fireactions --help >/dev/null
             - check: the rendered config is one fireactions own validator accepts
               id: fireactions-config-valid
+              run_as: root
               command: |
                 # R2/R7: this check renders through the SAME script the service does -
                 # /usr/local/bin/render-fireactions-config.sh - so it exercises the real renderer and cannot
@@ -113,8 +114,12 @@ check-fireactions-host:
                 # (`grep -q 'app_private_key: ""'`, a condition the candy's own config write ALWAYS satisfies).
                 #
                 # So it asserts the unit on WHATEVER configuration ships, and fails when the unit is absent or
-                # disabled. On a tree where the member deploy did not apply the composed candy's service entry
-                # this FAILS, and that failure is charly/charly#950 - named in the PR body, not hidden here.
                 set -eu
-                systemctl is-enabled fireactions
-                systemctl is-active fireactions
+                # R2/R7: the unit NAME is discovered, not hardcoded. charly installs a layer's
+                # service under charly-<layer>-<name>.service, so asserting the bare `fireactions`
+                # asked about a unit that never exists and made a correct guest look broken.
+                unit=$(systemctl list-unit-files --type=service --no-legend \
+                  | awk '{print $1}' | grep -E '(^|-)fireactions\.service$' | head -1)
+                test -n "$unit"
+                systemctl is-enabled "$unit"
+                systemctl is-active "$unit"
