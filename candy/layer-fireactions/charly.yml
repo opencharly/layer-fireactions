@@ -34,9 +34,11 @@ layer-fireactions:
         secret_accept:
           - name: FIREACTIONS_APP_PRIVATE_KEY
             description: >-
-                The GitHub App private key fireactions uses to register runners. Supplied here rather
-                than baked into the config, so a deployment without it fails visibly instead of
-                shipping a placeholder App key.
+                The GitHub App private key fireactions uses to register runners. Supplied here
+                rather than baked into the config, which never carries a key. When it is ABSENT
+                the renderer says so ON STDERR and writes a THROWAWAY RSA key, so the unit is
+                assertable and the boundary is visible; a deployment in that state will not
+                register runners.
             key: charly/fireactions/app-private-key
         service:
             # ONE entry, because the init system picks the form: systemd renders a unit from the exec, and
@@ -70,8 +72,11 @@ layer-fireactions:
                   src="$1"
                   dst="$2"
                   key="${FIREACTIONS_APP_PRIVATE_KEY:-}"
-                  if [ -z "$key" ]; then
-                      key=$(openssl genrsa 2048 2>/dev/null)
+                  if [ -n "$key" ]; then
+                    echo "render-fireactions-config: using the App key supplied at deploy time" >&2
+                  else
+                    echo "render-fireactions-config: FIREACTIONS_APP_PRIVATE_KEY is UNSET - writing a THROWAWAY RSA key so the unit is assertable; this deployment will NOT register runners" >&2
+                    key=$(openssl genrsa 2048 2>/dev/null)
                   fi
                   # R2/idempotence: strip the key's INTRODUCER *and its payload*. The old `sed` deleted only the
                   # two-space header, so a re-render of an already-rendered file left the previous PEM behind and

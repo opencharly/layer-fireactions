@@ -10,12 +10,11 @@ discover:
 # and drives Firecracker - a root daemon that a pod cannot host (the lesson
 # layer-containerd recorded when a uid-1000 supervisord could not setuid).
 #
-# The checks prove what can be proven without the GitHub App key, which the
-# ledger names as the visible-skip case: the server REFUSES to start on a
-# placeholder key (measured: "could not parse private key"), so the service and
-# pool checks are the ones a real key would enable, and the config's own
-# validator - the product's own tool, run in the plan - is the check that always
-# runs.
+# What the checks prove, and what they do not. The renderer writes a THROWAWAY RSA key
+# when no App key is supplied and says so on stderr, so the server STARTS and the unit is
+# assertable - MEASURED: all four checks below pass with no App key present. What that
+# state does NOT do is register runners, and no check here claims it does. The config's
+# own validator is the product's own tool, run in the plan.
 # =============================================================================
 fireactions-vm-base:
     vm:
