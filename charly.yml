@@ -110,7 +110,21 @@ check-fireactions-host:
                 # for a root drive, so the previous form of this check - a grep of the CRI plugin's
                 # default - passed while the substrate could not start (MEASURED, and the reason this
                 # check no longer asserts a value the substrate does not use).
-                ctr plugins ls | awk '$1 == "io.containerd.snapshotter.v1" && $2 == "blockfile" { print $NF }' | grep -qx ok
+                # `run_as:` is NOT honoured on a `check:` step (MEASURED: plugin-check has no run_as
+                # reference), so a bare `ctr` runs as the guest user and cannot reach the daemon socket -
+                # it exits with only a warning and the grep fails. `sudo -n ctr` is the mechanism the
+                # sibling check in opencharly/layer-containerd proved, and the rows are written to a file
+                # so a warning line cannot be mistaken for the answer.
+                sudo -n ctr plugins ls 2>&1 | grep -E 'TYPE|snapshotter' > /tmp/ctr-snap.txt || {
+                  echo "ctr plugins ls produced no snapshotter rows:" >&2
+                  sudo -n ctr plugins ls 2>&1 | head -20 >&2
+                  exit 1; }
+                cat /tmp/ctr-snap.txt
+                if ! grep -E 'snapshotter[[:space:]]+blockfile[[:space:]].*[[:space:]]ok' /tmp/ctr-snap.txt >/dev/null 2>&1; then
+                  echo "the DECLARED blockfile snapshotter is not served as ok - the rows above are the whole answer" >&2
+                  exit 1
+                fi
+                echo "blockfile snapshotter: ok"
             - check: the layer's own unit is enabled and active, which nothing but the service entry makes true
               id: fireactions-unit
               command: |
